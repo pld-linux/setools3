@@ -5,25 +5,25 @@
 #
 Summary:	Policy analysis tools for SELinux
 Summary(pl.UTF-8):	Narzędzia do analizy polityk SELinuksa
-Name:		setools
+Name:		setools3
 Version:	3.3.8
-Release:	5
+Release:	6
 License:	GPL v2+ (tools), LGPL v2.1+ (libraries)
 Group:		Applications/System
 #Source0Download: https://github.com/TresysTechnology/setools3/wiki/Download
-Source0:	https://raw.githubusercontent.com/wiki/TresysTechnology/setools3/files/dists/%{name}-%{version}/%{name}-%{version}.tar.bz2
+Source0:	https://raw.githubusercontent.com/wiki/TresysTechnology/setools3/files/dists/setools-%{version}/setools-%{version}.tar.bz2
 # Source0-md5:	d68d0d4e4da0f01da0f208782ff04b91
 Source1:	seaudit.pamd
-Patch0:		%{name}-swig.patch
-Patch1:		%{name}-sh.patch
-Patch2:		%{name}-tcl.patch
-Patch3:		%{name}-format.patch
-Patch4:		%{name}-swig-part2.patch
-Patch5:		%{name}-link.patch
-Patch6:		%{name}-x32.patch
-Patch7:		%{name}-swig-version.patch
-Patch8:		%{name}-sepol.patch
-Patch9:		%{name}-selinux.patch
+Patch0:		setools-swig.patch
+Patch1:		setools-sh.patch
+Patch2:		setools-tcl.patch
+Patch3:		setools-format.patch
+Patch4:		setools-swig-part2.patch
+Patch5:		setools-link.patch
+Patch6:		setools-x32.patch
+Patch7:		setools-swig-version.patch
+Patch8:		setools-sepol.patch
+Patch9:		setools-selinux.patch
 Patch10:	python-prefix.patch
 URL:		https://github.com/TresysTechnology/setools3/wiki
 BuildRequires:	autoconf >= 2.59
@@ -36,8 +36,8 @@ BuildRequires:	gtk+2-devel >= 2:2.8
 %{?with_java:BuildRequires:	jdk >= 1.2}
 BuildRequires:	libglade2-devel >= 2.0
 BuildRequires:	libselinux-devel >= 1.30
-BuildRequires:	libsepol-devel >= 2.4
-BuildRequires:	libsepol-static >= 2.4
+BuildRequires:	libsepol-devel >= 2.8
+BuildRequires:	libsepol-static >= 2.8
 BuildRequires:	libstdc++-devel
 BuildRequires:	libtool
 BuildRequires:	libxml2-devel >= 2
@@ -53,9 +53,10 @@ BuildRequires:	tcl-devel >= 8.4
 BuildRequires:	tk-devel >= 8.4
 Requires:	%{name}-libs = %{version}-%{release}
 Suggests:	policy-sources
+Obsoletes:	setools < 4
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
-%define		pkgdatadir	%{_datadir}/%{name}-3.3
+%define		pkgdatadir	%{_datadir}/setools-3.3
 
 # python modules use Py* symbols, some of .so files are versioned
 %define		skip_post_check_so	.*%{py_sitedir}/setools/.*
@@ -91,6 +92,7 @@ Requires:	%{name} = %{version}-%{release}
 Requires:	gtk+2 >= 2:2.8
 Requires:	tk >= 8.4
 Requires:	tk-BWidget >= 1.8
+Obsoletes:	setools-gui < 4
 
 %description gui
 SETools is a collection of graphical tools, command-line tools, and
@@ -116,8 +118,9 @@ Summary(pl.UTF-8):	Biblioteki wspierające analizę polityk SELinuksa
 License:	LGPL v2.1+
 Group:		Libraries
 Requires:	libselinux >= 2.4
-Requires:	libsepol >= 2.4
+Requires:	libsepol >= 2.8
 Requires:	sqlite3 >= 3.2.0
+Obsoletes:	setools-libs < 4
 
 %description libs
 SETools is a collection of graphical tools, command-line tools, and
@@ -148,6 +151,7 @@ Summary(pl.UTF-8):	Pliki nagłówkowe bibliotek SETools
 License:	LGPL v2.1+
 Group:		Development/Libraries
 Requires:	%{name}-libs = %{version}-%{release}
+Obsoletes:	setools-devel < 4
 
 %description devel
 Header files for SETools libraries: libapol, libpoldiff, libqpol,
@@ -163,6 +167,7 @@ Summary(pl.UTF-8):	Statyczne biblioteki SETools
 License:	LGPL v2.1+
 Group:		Development/Libraries
 Requires:	%{name}-devel = %{version}-%{release}
+Obsoletes:	setools-static < 4
 
 %description static
 Static SETools libraries.
@@ -201,14 +206,16 @@ Ten pakiet zawiera wiązania Javy do bibliotek uruchomieniowych:
   z plików logów
 - libsefs - kontekstów plików SELinuksa
 
-%package -n python-setools
+%package -n python-setools3
 Summary:	Python bindings for SELinux policy analysis libraries
 Summary(pl.UTF-8):	Wiązania Pythona do bibliotek analizy polityk SELinuksa
 License:	LGPL v2.1+ (core modules), GPL v2+ (seinfo and sesearch)
 Group:		Libraries/Python
 Requires:	%{name}-libs = %{version}-%{release}
+Requires:	python-setools >= 4
+Obsoletes:	python-setools < 4
 
-%description -n python-setools
+%description -n python-setools3
 SETools is a collection of graphical tools, command-line tools, and
 libraries designed to facilitate SELinux policy analysis.
 
@@ -219,7 +226,7 @@ This package includes Python bindings for the following libraries:
 - libseaudit: parse and filter SELinux audit messages in log files
 - libsefs: SELinux file contexts library
 
-%description -n python-setools -l pl.UTF-8
+%description -n python-setools3 -l pl.UTF-8
 SETools to zbiór narzędzi graficznych, narzędzi linii poleceń oraz
 bibliotek mających na celu ułatwienie analizy polityk SELinuksa.
 
@@ -263,7 +270,7 @@ Ten pakiet zawiera wiązania Tcl-a do bibliotek uruchomieniowych:
 - libsefs - kontekstów plików SELinuksa
 
 %prep
-%setup -q
+%setup -q -n setools-%{version}
 %patch0 -p1
 %patch1 -p1
 %patch2 -p1
@@ -301,9 +308,16 @@ install -d $RPM_BUILD_ROOT{%{_desktopdir},%{_pixmapsdir},/etc/pam.d}
 %{__make} install \
 	DESTDIR=$RPM_BUILD_ROOT
 
+# continued in setools 4.x
+%{__rm} $RPM_BUILD_ROOT%{_bindir}/{apol,sediff,seinfo,sesearch}
+%{__rm} $RPM_BUILD_ROOT%{_mandir}/man1/{apol,sediff,seinfo,sesearch}.1
+%if %{with python}
+%{__rm} $RPM_BUILD_ROOT%{py_sitedir}/setools/{_qpol.so*,qpol.py}
+%endif
+
 cp -p %{SOURCE1} $RPM_BUILD_ROOT/etc/pam.d/seaudit
-cp -p packages/rpm/*.desktop $RPM_BUILD_ROOT%{_desktopdir}
-cp -p apol/apol.png seaudit/seaudit.png sediff/sediffx.png $RPM_BUILD_ROOT%{_pixmapsdir}
+cp -p packages/rpm/{seaudit,sediffx}.desktop $RPM_BUILD_ROOT%{_desktopdir}
+cp -p seaudit/seaudit.png sediff/sediffx.png $RPM_BUILD_ROOT%{_pixmapsdir}
 
 # let rpm autodetect dependencies
 chmod 755 $RPM_BUILD_ROOT%{_libdir}/lib*.so* \
@@ -336,9 +350,6 @@ rm -rf $RPM_BUILD_ROOT
 %attr(755,root,root) %{_bindir}/replcon
 %attr(755,root,root) %{_bindir}/seaudit-report
 %attr(755,root,root) %{_bindir}/sechecker
-%attr(755,root,root) %{_bindir}/sediff
-%attr(755,root,root) %{_bindir}/seinfo
-%attr(755,root,root) %{_bindir}/sesearch
 %dir %{pkgdatadir}
 %{pkgdatadir}/sechecker-profiles
 %{pkgdatadir}/sechecker_help.txt
@@ -349,14 +360,10 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man1/indexcon.1*
 %{_mandir}/man1/replcon.1*
 %{_mandir}/man1/sechecker.1*
-%{_mandir}/man1/sediff.1*
-%{_mandir}/man1/seinfo.1*
-%{_mandir}/man1/sesearch.1*
 %{_mandir}/man8/seaudit-report.8*
 
 %files gui
 %defattr(644,root,root,755)
-%attr(755,root,root) %{_bindir}/apol
 %attr(755,root,root) %{_bindir}/sediffx
 %attr(755,root,root) %{_sbindir}/seaudit
 %dir %{_libdir}/setools/apol_tcl
@@ -375,13 +382,10 @@ rm -rf $RPM_BUILD_ROOT
 %{pkgdatadir}/*.glade
 %{pkgdatadir}/*.png
 %config(noreplace) %verify(not md5 mtime size) /etc/pam.d/seaudit
-%{_desktopdir}/apol.desktop
 %{_desktopdir}/seaudit.desktop
 %{_desktopdir}/sediffx.desktop
-%{_pixmapsdir}/apol.png
 %{_pixmapsdir}/seaudit.png
 %{_pixmapsdir}/sediffx.png
-%{_mandir}/man1/apol.1*
 %{_mandir}/man1/sediffx.1*
 %{_mandir}/man8/seaudit.8*
 
@@ -451,12 +455,11 @@ rm -rf $RPM_BUILD_ROOT
 %endif
 
 %if %{with python}
-%files -n python-setools
+%files -n python-setools3
 %defattr(644,root,root,755)
 %dir %{py_sitedir}/setools
 %attr(755,root,root) %{py_sitedir}/setools/_apol.so*
 %attr(755,root,root) %{py_sitedir}/setools/_poldiff.so*
-%attr(755,root,root) %{py_sitedir}/setools/_qpol.so*
 %attr(755,root,root) %{py_sitedir}/setools/_seaudit.so*
 %attr(755,root,root) %{py_sitedir}/setools/_sefs.so*
 %attr(755,root,root) %{py_sitedir}/setools/_seinfo.so
@@ -464,7 +467,6 @@ rm -rf $RPM_BUILD_ROOT
 %{py_sitedir}/setools/__init__.py[co]
 %{py_sitedir}/setools/apol.py[co]
 %{py_sitedir}/setools/poldiff.py[co]
-%{py_sitedir}/setools/qpol.py[co]
 %{py_sitedir}/setools/seaudit.py[co]
 %{py_sitedir}/setools/sefs.py[co]
 %{py_sitedir}/setools-1.0-py*.egg-info

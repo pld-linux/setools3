@@ -62,3 +62,478 @@
  			if (tmp) {
  				tmp++; /* remove prepended space */
  				for (cur = 0; cur < perm_list_sz; cur++)
+--- setools-3.3.8/libqpol/src/mlsrule_query.c	2013-01-16 17:36:24.000000000 +0100
++++ setools-4.1.1/libqpol/mlsrule_query.c	2017-08-05 22:07:48.000000000 +0200
+@@ -36,7 +36,8 @@
+ 
+ typedef struct range_trans_state
+ {
+-	range_trans_t *head;
++    unsigned int bucket;
++    hashtab_ptr_t cur_item;
+ 	range_trans_t *cur;
+ } range_trans_state_t;
+ 
+@@ -55,8 +56,9 @@
+ static void *range_trans_state_get_cur(const qpol_iterator_t * iter)
+ {
+ 	range_trans_state_t *rs = NULL;
++    const policydb_t *db = NULL;
+ 
+-	if (!iter || !(rs = qpol_iterator_state(iter))) {
++	if (!iter || !(rs = qpol_iterator_state(iter)) || !(db = qpol_iterator_policy(iter))) {
+ 		errno = EINVAL;
+ 		return NULL;
+ 	}
+@@ -67,8 +69,9 @@
+ static int range_trans_state_next(qpol_iterator_t * iter)
+ {
+ 	range_trans_state_t *rs = NULL;
++    const policydb_t *db = NULL;
+ 
+-	if (!iter || !(rs = qpol_iterator_state(iter))) {
++	if (!iter || !(rs = qpol_iterator_state(iter))  || !(db = qpol_iterator_policy(iter))) {
+ 		errno = EINVAL;
+ 		return STATUS_ERR;
+ 	}
+@@ -78,7 +81,21 @@
+ 		return STATUS_ERR;
+ 	}
+ 
+-	rs->cur = rs->cur->next;
++    rs->cur_item = rs->cur_item->next;
++    while (rs->cur_item == NULL) {
++        rs->bucket++;
++        if (rs->bucket >= db->range_tr->size) {
++            break;
++        }
++
++        rs->cur_item = db->range_tr->htable[rs->bucket];
++    }
++
++    if (rs->cur_item == NULL) {
++        rs->cur = NULL;
++    } else {
++        rs->cur = (range_trans_t*)rs->cur_item->key;
++    }
+ 
+ 	return STATUS_SUCCESS;
+ }
+@@ -86,16 +103,23 @@
+ static size_t range_trans_state_size(const qpol_iterator_t * iter)
+ {
+ 	range_trans_state_t *rs = NULL;
++    const policydb_t *db = NULL;
+ 	size_t count = 0;
+-	range_trans_t *tmp = NULL;
++    unsigned int i = 0;
+ 
+-	if (!iter || !(rs = qpol_iterator_state(iter))) {
++	if (!iter || !(rs = qpol_iterator_state(iter)) || !(db = qpol_iterator_policy(iter))) {
+ 		errno = EINVAL;
+ 		return 0;
+ 	}
+ 
+-	for (tmp = rs->head; tmp; tmp = tmp->next)
+-		count++;
++    hashtab_ptr_t cur = NULL;
++    for (i = 0; i < db->range_tr->size; i++) {
++        cur = db->range_tr->htable[i];
++        while (cur != NULL) {
++            count++;
++            cur = cur->next;
++        }
++    }
+ 
+ 	return count;
+ }
+@@ -133,7 +157,24 @@
+ 		return STATUS_ERR;
+ 	}
+ 
+-	rs->head = rs->cur = db->range_tr;
++    rs->bucket = 0;
++    rs->cur_item = db->range_tr->htable[0];
++    rs->cur = NULL;
++
++    rs->cur_item = db->range_tr->htable[rs->bucket];
++    while (rs->cur_item == NULL) {
++        rs->bucket++;
++        if (rs->bucket >= db->range_tr->size) {
++            break;
++        }
++
++        rs->cur_item = db->range_tr->htable[rs->bucket];
++    }
++
++    if (rs->cur_item != NULL) {
++        rs->cur = (range_trans_t*)rs->cur_item->key;
++    }
++    
+ 	return STATUS_SUCCESS;
+ }
+ 
+@@ -208,7 +249,6 @@
+ 
+ int qpol_range_trans_get_range(const qpol_policy_t * policy, const qpol_range_trans_t * rule, const qpol_mls_range_t ** range)
+ {
+-	policydb_t *db = NULL;
+ 	range_trans_t *rt = NULL;
+ 
+ 	if (range) {
+@@ -221,10 +261,16 @@
+ 		return STATUS_ERR;
+ 	}
+ 
+-	db = &policy->p->p;
++    policydb_t *db = &policy->p->p;
+ 	rt = (range_trans_t *) rule;
++    mls_range_t *target_range = NULL;
++
++    target_range = hashtab_search(db->range_tr, (hashtab_key_t)rt);
++    if (target_range == NULL) {
++        return STATUS_ERR;
++    }
+ 
+-	*range = (qpol_mls_range_t *) & rt->target_range;
++	*range = (qpol_mls_range_t *)target_range;
+ 
+ 	return STATUS_SUCCESS;
+ }
+--- setools-3.3.8/libqpol/src/policy_define.c.orig	2018-07-17 17:29:40.264481696 +0200
++++ setools-3.3.8/libqpol/src/policy_define.c	2018-07-17 17:53:07.581132295 +0200
+@@ -45,8 +45,14 @@
+ #include <string.h>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
++#ifndef IPPROTO_DCCP
++#define IPPROTO_DCCP 33
++#endif
+ #include <arpa/inet.h>
+ #include <stdlib.h>
++#include <limits.h>
++#include <inttypes.h>
++#include <ctype.h>
+ 
+ #include <sepol/policydb/expand.h>
+ #include <sepol/policydb/policydb.h>
+@@ -54,18 +60,14 @@
+ #include <sepol/policydb/conditional.h>
+ #include <sepol/policydb/flask.h>
+ #include <sepol/policydb/hierarchy.h>
+-#ifdef HAVE_SEPOL_POLICYCAPS
+ #include <sepol/policydb/polcaps.h>
+-#endif
+-#ifdef HAVE_SEPOL_ERRCODES
+-#include <sepol/errcodes.h>
+-#endif
+-
+ #include "queue.h"
+-#include <qpol/policy.h>
+ #include "module_compiler.h"
+ #include "policy_define.h"
+ 
++/* Required for SETools libqpol - Removed #include "checkpolicy.h"*/
++#include <qpol/policy.h>
++
+ policydb_t *policydbp;
+ queue_t id_queue = 0;
+ unsigned int pass;
+@@ -78,8 +80,8 @@
+ extern unsigned long source_lineno;
+ extern unsigned int policydb_errors;
+ 
+-extern int yywarn(char *msg);
+-extern int yyerror(char *msg);
++extern int yywarn(const char *msg);
++extern int yyerror(const char *msg);
+ 
+ #define ERRORMSG_LEN 255
+ static char errormsg[ERRORMSG_LEN + 1] = { 0 };
+@@ -98,6 +100,7 @@
+ 	num_rules = 0;
+ }
+ 
++__attribute__ ((format(printf, 1, 2)))
+ void yyerror2(char *fmt, ...)
+ {
+ 	va_list ap;
+@@ -107,6 +110,7 @@
+ 	va_end(ap);
+ }
+ 
++/* Required for SETools libqpol */
+ int define_mls(void)
+ {
+ 	mlspol = 1;
+@@ -2243,12 +2247,13 @@
+ 	ebitmap_t e_tclasses;
+ 	ebitmap_node_t *snode, *tnode, *cnode;
+ 	filename_trans_t *ft;
++	filename_trans_datum_t *ftdatum;
+ 	filename_trans_rule_t *ftr;
+ 	class_datum_t *cladatum;
+ 	type_datum_t *typdatum;
+ 	uint32_t otype;
+ 	unsigned int c, s, t;
+-	int add;
++	int add, rc;
+ 
+ 	if (pass == 1) {
+ 		/* stype */
+@@ -2347,40 +2352,46 @@
+ 			ebitmap_for_each_bit(&e_ttypes, tnode, t) {
+ 				if (!ebitmap_node_get_bit(tnode, t))
+ 					continue;
+-	
+-				for (ft = policydbp->filename_trans; ft; ft = ft->next) {
+-					if (ft->stype == (s + 1) &&
+-					    ft->ttype == (t + 1) &&
+-					    ft->tclass == (c + 1) &&
+-					    !strcmp(ft->name, name)) {
+-						yyerror2("duplicate filename transition for: filename_trans %s %s %s:%s",
+-							 name, 
+-							 policydbp->p_type_val_to_name[s],
+-							 policydbp->p_type_val_to_name[t],
+-							 policydbp->p_class_val_to_name[c]);
+-						goto bad;
+-					}
+-				}
+-	
+-				ft = malloc(sizeof(*ft));
++
++				ft = calloc(1, sizeof(*ft));
+ 				if (!ft) {
+ 					yyerror("out of memory");
+ 					goto bad;
+ 				}
+-				memset(ft, 0, sizeof(*ft));
+-	
+-				ft->next = policydbp->filename_trans;
+-				policydbp->filename_trans = ft;
+-	
++				ft->stype = s + 1;
++				ft->ttype = t + 1;
++				ft->tclass = c + 1;
+ 				ft->name = strdup(name);
+ 				if (!ft->name) {
+ 					yyerror("out of memory");
+ 					goto bad;
+ 				}
+-				ft->stype = s + 1;
+-				ft->ttype = t + 1;
+-				ft->tclass = c + 1;
+-				ft->otype = otype;
++
++				ftdatum = hashtab_search(policydbp->filename_trans,
++							 (hashtab_key_t)ft);
++				if (ftdatum) {
++					yyerror2("duplicate filename transition for: filename_trans %s %s %s:%s",
++						 name,
++						 policydbp->p_type_val_to_name[s],
++						 policydbp->p_type_val_to_name[t],
++						 policydbp->p_class_val_to_name[c]);
++					goto bad;
++				}
++
++				ftdatum = calloc(1, sizeof(*ftdatum));
++				if (!ftdatum) {
++					yyerror("out of memory");
++					goto bad;
++				}
++				ftdatum->otype = otype;
++	
++				rc = hashtab_insert(policydbp->filename_trans,
++						    (hashtab_key_t)ft,
++						    ftdatum);
++				if (rc) {
++					yyerror("out of memory");
++					goto bad;
++				}
+ 			}
+ 		}
+ 	
+@@ -2394,8 +2405,14 @@
+ 		append_filename_trans(ftr);
+ 
+ 		ftr->name = strdup(name);
+-		ftr->stypes = stypes;
+-		ftr->ttypes = ttypes;
++		if (type_set_cpy(&ftr->stypes, &stypes)) {
++			yyerror("out of memory");
++			goto bad;
++		}
++		if (type_set_cpy(&ftr->ttypes, &ttypes)) {
++			yyerror("out of memory");
++			goto bad;
++		}
+ 		ftr->tclass = c + 1;
+ 		ftr->otype = otype;
+ 	}
+@@ -3703,7 +3720,7 @@
+ 	newc->u.iomem.high_iomem = high;
+ 
+ 	if (low > high) {
+-		yyerror2("low memory 0x%x exceeds high memory 0x%x", low, high);
++		yyerror2("low memory 0x%lx exceeds high memory 0x%lx", low, high);
+ 		free(newc);
+ 		return -1;
+ 	}
+@@ -3715,12 +3732,14 @@
+ 
+ 	head = policydbp->ocontexts[OCON_XEN_IOMEM];
+ 	for (l = NULL, c = head; c; l = c, c = c->next) {
+-		unsigned int low2, high2;
++		unsigned long low2, high2;
+ 
+ 		low2 = c->u.iomem.low_iomem;
+ 		high2 = c->u.iomem.high_iomem;
+ 		if (low <= high2 && low2 <= high) {
+-			yyerror2("iomemcon entry for 0x%x-0x%x overlaps with " "earlier entry 0x%x-0x%x", low, high, low2, high2);
++			yyerror2("iomemcon entry for 0x%lx-0x%lx overlaps with "
++				"earlier entry 0x%lx-0x%lx", low, high,
++				low2, high2);
+ 			goto bad;
+ 		}
+ 	}
+@@ -3770,7 +3789,7 @@
+ 	newc->u.ioport.high_ioport = high;
+ 
+ 	if (low > high) {
+-		yyerror2("low ioport 0x%x exceeds high ioport 0x%x", low, high);
++		yyerror2("low ioport 0x%lx exceeds high ioport 0x%lx", low, high);
+ 		free(newc);
+ 		return -1;
+ 	}
+@@ -3787,7 +3806,9 @@
+ 		low2 = c->u.ioport.low_ioport;
+ 		high2 = c->u.ioport.high_ioport;
+ 		if (low <= high2 && low2 <= high) {
+-			yyerror2("ioportcon entry for 0x%x-0x%x overlaps with" "earlier entry 0x%x-0x%x", low, high, low2, high2);
++			yyerror2("ioportcon entry for 0x%lx-0x%lx overlaps with"
++				"earlier entry 0x%x-0x%x", low, high,
++				low2, high2);
+ 			goto bad;
+ 		}
+ 	}
+@@ -3846,7 +3867,8 @@
+ 
+ 		device2 = c->u.device;
+ 		if (device == device2) {
+-			yyerror2("duplicate pcidevicecon entry for 0x%x ", device);
++			yyerror2("duplicate pcidevicecon entry for 0x%lx",
++				 device);
+ 			goto bad;
+ 		}
+ 	}
+--- setools-3.3.8/libqpol/src/ftrule_query.c	2013-01-16 17:36:24.000000000 +0100
++++ setools-4.1.1/libqpol/ftrule_query.c	2017-08-05 22:07:48.000000000 +0200
+@@ -29,10 +29,12 @@
+ #include "iterator_internal.h"
+ #include "qpol_internal.h"
+ #include <sepol/policydb/policydb.h>
++#include <sepol/policydb/hashtab.h>
+ 
+ typedef struct filename_trans_state
+ {
+-	filename_trans_t *head;
++	unsigned int bucket;
++	hashtab_ptr_t cur_item;
+ 	filename_trans_t *cur;
+ } filename_trans_state_t;
+ 
+@@ -76,7 +78,21 @@
+ 		return STATUS_ERR;
+ 	}
+ 
+-	fts->cur = fts->cur->next;
++	fts->cur_item = fts->cur_item->next;
++	while (fts->cur_item == NULL) {
++		fts->bucket++;
++		if (fts->bucket >= db->filename_trans->size) {
++            break;
++		}
++
++		fts->cur_item = db->filename_trans->htable[fts->bucket];
++	}
++
++    if (fts->cur_item == NULL) {
++        fts->cur = NULL;
++    } else {
++        fts->cur = (filename_trans_t*)fts->cur_item->key;
++    }
+ 
+ 	return STATUS_SUCCESS;
+ }
+@@ -85,16 +101,22 @@
+ {
+ 	filename_trans_state_t *fts = NULL;
+ 	const policydb_t *db = NULL;
+-	filename_trans_t *tmp = NULL;
+ 	size_t count = 0;
++    unsigned int i = 0;
+ 
+ 	if (!iter || !(fts = qpol_iterator_state(iter)) || !(db = qpol_iterator_policy(iter))) {
+ 		errno = EINVAL;
+-		return STATUS_ERR;
++		return 0;
+ 	}
+ 
+-	for (tmp = fts->head; tmp; tmp = tmp->next)
+-		count++;
++	hashtab_ptr_t cur = NULL;
++	for (i = 0; i < db->filename_trans->size; i++) {
++		cur = db->filename_trans->htable[i];
++		while (cur != NULL) {
++			count++;
++			cur = cur->next;
++		}
++	}
+ 
+ 	return count;
+ }
+@@ -122,8 +144,25 @@
+ 		ERR(policy, "%s", strerror(errno));
+ 		return STATUS_ERR;
+ 	}
+-	fts->head = fts->cur = db->filename_trans;
+ 
++	fts->bucket = 0;
++	fts->cur_item = db->filename_trans->htable[0];
++	fts->cur = NULL;
++
++	fts->cur_item = db->filename_trans->htable[fts->bucket];
++	while (fts->cur_item == NULL) {
++		fts->bucket++;
++		if (fts->bucket >= db->filename_trans->size) {
++			break;
++		}
++
++		fts->cur_item = db->filename_trans->htable[fts->bucket];
++	}
++
++	if (fts->cur_item != NULL) {
++		fts->cur = (filename_trans_t*)fts->cur_item->key;
++	}
++	
+ 	if (qpol_iterator_create
+ 	    (policy, (void *)fts, filename_trans_state_get_cur, filename_trans_state_next, filename_trans_state_end, filename_trans_state_size,
+ 	     free, iter)) {
+@@ -224,7 +263,16 @@
+ 	db = &policy->p->p;
+ 	ft = (filename_trans_t *) rule;
+ 
+-	*dflt = (qpol_type_t *) db->type_val_to_struct[ft->otype - 1];
++	/* Since the filename_trans rules were converted to being stored in a hashtab, otype was moved to the datum of the hashtab.
++	 * So we just look it up here.
++	 */
++	filename_trans_datum_t *datum = hashtab_search(db->filename_trans, (hashtab_key_t)ft);
++
++	if (datum == NULL) {
++		return STATUS_ERR;
++	}
++
++	*dflt = (qpol_type_t *) db->type_val_to_struct[datum->otype - 1];
+ 
+ 	return STATUS_SUCCESS;
+ }
